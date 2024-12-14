@@ -11,6 +11,16 @@ import json
 from sklearn.feature_extraction.text import TfidfVectorizer
 from collections import Counter
 
+import spacy
+from spacy.cli import download
+
+# Vérifiez si le modèle est disponible, sinon téléchargez-le
+try:
+    nlp = spacy.load("fr_core_news_sm")
+except OSError:
+    download("fr_core_news_sm")
+    nlp = spacy.load("fr_core_news_sm")
+    
 # Centrer le titre au milieu de la page avec du Markdown
 st.markdown("""
     <style>
