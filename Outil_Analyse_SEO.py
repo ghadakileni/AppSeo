@@ -11,67 +11,40 @@ import json
 from sklearn.feature_extraction.text import TfidfVectorizer
 from collections import Counter
 
-import spacy
-from spacy.cli import download
+# Mise en cache pour optimiser le chargement
+@st.cache_resource
+def load_spacy_model():
+    try:
+        return spacy.load("fr_core_news_sm")
+    except OSError:
+        from spacy.cli import download
+        download("fr_core_news_sm")
+        return spacy.load("fr_core_news_sm")
 
-# Vérifiez si le modèle est disponible, sinon téléchargez-le
-try:
-    nlp = spacy.load("fr_core_news_sm")
-except OSError:
-    download("fr_core_news_sm")
-    nlp = spacy.load("fr_core_news_sm")
-    
-# Centrer le titre au milieu de la page avec du Markdown
-st.markdown("""
-    <style>
-        .footer {
-            position: fixed;
-            bottom: 10px;
-            width: 100%;
-            text-align: center;
-            font-size: 10px;
-            color: #555;
-            font-style: italic;
-            padding: 10px 0;
-
-        }
-    </style>
-
-    <div class="footer">Made by :  Ghada EL KILENI | Aya MABROUK | Thafath Halouane | Xavier meynard | Lola labory \n -  Copyright © 2024 Outil d'Analyse SEO</div>
-    
-""", unsafe_allow_html=True)
-
-# Charger le modèle NLP de spaCy
-nlp = spacy.load("fr_core_news_sm")
+# Chargement du modèle NLP
+nlp = load_spacy_model()
 
 # Fonction pour analyser le sentiment
+@st.cache_data
 def analyse_sentiment(text):
     blob = TextBlob(text)
-    polarity = blob.sentiment.polarity  # Entre -1 (négatif) et 1 (positif)
-    subjectivity = blob.sentiment.subjectivity  # Entre 0 (objectif) et 1 (subjectif)
+    polarity = blob.sentiment.polarity
+    subjectivity = blob.sentiment.subjectivity
     return polarity, subjectivity
 
 # Fonction pour le nettoyage et la normalisation du texte
+@st.cache_data
 def clean_text(text):
-    text = text.lower()  # Mettre tout en minuscules
-    return text
+    return text.lower()
 
-# Fonction pour extraire les mots les plus répétés dans le texte
+# Fonction pour extraire les mots les plus répétés
+@st.cache_data
 def extract_keywords(text, max_keywords=10):
     text = clean_text(text)
     doc = nlp(text)
-
-    # Extraction des mots lemmatisés, en excluant les mots vides et les signes de ponctuation
     lemmatized_words = [token.lemma_ for token in doc if not token.is_stop and token.is_alpha]
-
-    # Comptage des occurrences des mots
     word_counts = Counter(lemmatized_words)
-
-    # Sélection des mots les plus fréquents
-    most_common_keywords = word_counts.most_common(max_keywords)
-
-    # Renvoie les mots les plus fréquents avec leurs occurrences
-    return [word for word, _ in most_common_keywords]
+    return [word for word, _ in word_counts.most_common(max_keywords)]
 
 # Fonction pour générer un nuage de mots
 def generate_wordcloud(keywords):
@@ -83,6 +56,7 @@ def generate_wordcloud(keywords):
     st.pyplot(plt)
 
 # Fonction pour vérifier les liens
+@st.cache_data
 def check_links(links):
     link_status = []
     for link in links:
@@ -95,10 +69,18 @@ def check_links(links):
     return pd.DataFrame(link_status)
 
 # Fonction pour enrichir les descriptions avec spaCy
+@st.cache_data
 def enrichir_description(texte):
     doc = nlp(texte)
-    description = " ".join([token.text for token in doc])
-    return description
+    return " ".join([token.text for token in doc])
+
+# Vérification de la disponibilité de l'API Ollama
+def is_ollama_api_available():
+    try:
+        response = requests.get('http://localhost:11434/health', timeout=5)
+        return response.status_code == 200
+    except requests.RequestException:
+        return False
 
 # Fonction pour envoyer un prompt à l'API Ollama
 def message_llama(prompt, model="llama3.2:1b", max_tokens=100, temperature=0.7, top_p=1, n=1):
@@ -135,9 +117,9 @@ def message_llama(prompt, model="llama3.2:1b", max_tokens=100, temperature=0.7, 
     except Exception as e:
         st.error(f"Erreur inattendue : {e}")
         return None
-
 # Titre de l'application
 st.title("Outil d'Analyse SEO")
+
 # Formulaire pour l'entrée de l'URL
 url = st.text_input("Entrez l'URL à analyser :", "")
 
@@ -161,23 +143,23 @@ if url:
 
                 # Section 2 : Nuage de Mots
                 st.header("2. Nuage de Mots")
-                text_content = ' '.join([p.get_text() for p in soup.find_all('p')])  # Récupérer tout le texte
-                keywords_text = extract_keywords(text_content)  # Extraire les mots les plus fréquents
-                generate_wordcloud(keywords_text)  # Afficher le nuage de mots
+                text_content = ' '.join([p.get_text() for p in soup.find_all('p')])
+                keywords_text = extract_keywords(text_content)
+                generate_wordcloud(keywords_text)
 
                 # Section 3 : Analyse des Liens
                 st.header("3. Analyse des Liens")
                 links = [urljoin(url, a['href']) for a in soup.find_all('a', href=True)]
                 if st.button("Analyser les Liens"):
-                    link_status_df = check_links(links)
-                    st.write(link_status_df)
+                    with st.spinner("Vérification des liens en cours..."):
+                        link_status_df = check_links(links)
+                        st.write(link_status_df)
 
-               # Section 3 : Analyse des Images
+                # Section 4 : Analyse des Images
                 st.header("4. Analyse des Images")
                 image_data = []
                 images = soup.find_all('img')
 
-                # Analyser les images
                 for img in images:
                     img_src = img.get('src')
                     img_alt = img.get('alt', 'Aucune description')
@@ -192,21 +174,17 @@ if url:
 
                 df_images = pd.DataFrame(image_data)
 
-                # Ajouter un bouton pour afficher/masquer les images
                 if "show_images" not in st.session_state:
-                    st.session_state["show_images"] = False  # Par défaut, les images sont masquées
+                    st.session_state["show_images"] = False
 
-                # Bouton pour basculer entre affichage et masquage
                 if st.button("Afficher/Masquer les Images"):
                     st.session_state["show_images"] = not st.session_state["show_images"]
 
-                # Afficher les images si le bouton est activé
                 if st.session_state["show_images"]:
                     st.info(" 🔍 Cliquez sur les icônes pour voir les images en taille réelle.")
                     st.write(df_images.to_html(escape=False), unsafe_allow_html=True)
                 else:
                     st.info("💬 Les images analysées sont masquées. Cliquez sur le bouton pour les afficher.")
-
 
                 # Section 5 : Analyse de Sentiment
                 st.header("5. Analyse de Sentiment")
@@ -217,16 +195,15 @@ if url:
                 st.progress(subjectivity)
 
                 sentiment_text = "Positif 😊" if polarity > 0 else "Négatif 😟" if polarity < 0 else "Neutre ⚖️"
-                if sentiment_text == "Positif 😊" :
+                if sentiment_text == "Positif 😊":
                     st.success(f"Sentiment global : {sentiment_text}")
-
-                elif sentiment_text == "Négatif 😟" :
-                     st.error(f"Sentiment global : {sentiment_text}")
-                else :
+                elif sentiment_text == "Négatif 😟":
+                    st.error(f"Sentiment global : {sentiment_text}")
+                else:
                     st.warning(f"Sentiment global : {sentiment_text}")
 
-                
                 # Section 6 : Recommandations SEO
+               # Section 6 : Recommandations SEO
                 st.header("6. Recommandations SEO 🛠️")
                 prompt = f"Analyse SEO du site : {url}\nTitre : {title_tag}\nDescription : {meta_description}"
                 if st.button("Générer les recommandations SEO"):
