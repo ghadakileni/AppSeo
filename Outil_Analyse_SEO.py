@@ -1,7 +1,6 @@
 import streamlit as st
 from bs4 import BeautifulSoup
 import requests
-import re
 import pandas as pd
 from textblob import TextBlob
 from wordcloud import WordCloud
